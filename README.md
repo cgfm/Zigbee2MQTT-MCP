@@ -1,5 +1,9 @@
 # Zigbee2MQTT-MCP
 
+[![Release](https://img.shields.io/github/v/release/cgfm/Zigbee2MQTT-MCP?display_name=tag&sort=semver)](https://github.com/cgfm/Zigbee2MQTT-MCP/releases/latest)
+[![CI](https://github.com/cgfm/Zigbee2MQTT-MCP/actions/workflows/pull-request.yml/badge.svg?branch=main)](https://github.com/cgfm/Zigbee2MQTT-MCP/actions/workflows/pull-request.yml)
+[![GHCR image](https://img.shields.io/badge/GHCR-zigbee2mqtt--mcp-2496ED?logo=github)](https://github.com/cgfm/Zigbee2MQTT-MCP/pkgs/container/zigbee2mqtt-mcp)
+
 Zigbee2MQTT-MCP exposes a Zigbee2MQTT installation as a secure Model Context Protocol (MCP) server. One TypeScript application and one OCI image support local Node.js use, ordinary Docker deployments, and the Home Assistant app.
 
 The server provides Streamable HTTP at `/mcp`, legacy SSE at `/sse` with messages posted to `/messages`, and stdio transport. HTTP transport requires a Bearer token. It also enforces origin, request-size, authentication-rate, session, MQTT-message, and pending-bridge-request limits.
