@@ -161,3 +161,44 @@ test('session and authentication failure limits are enforced', async () => {
     await service.close();
   }
 });
+
+test('destructive tools require both opt-in and explicit confirmation', async () => {
+  const service = await startHttpServer(config({ allowDestructive: true }), db, mqtt);
+  const base = `http://127.0.0.1:${service.port}`;
+  try {
+    const initialize = await fetch(`${base}/mcp`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: mcpBody(1, 'initialize', {
+        protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' },
+      }),
+    });
+    const sessionId = initialize.headers.get('mcp-session-id');
+    assert.equal(initialize.status, 200);
+    assert.ok(sessionId);
+    await initialize.text();
+
+    const tools = await fetch(`${base}/mcp`, {
+      method: 'POST',
+      headers: authHeaders({ 'mcp-session-id': sessionId }),
+      body: mcpBody(2, 'tools/list'),
+    });
+    const toolMessage = await responseMessage(tools);
+    const removeDevice = toolMessage.result.tools.find(tool => tool.name === 'remove_device');
+    assert.ok(removeDevice);
+    assert.ok(removeDevice.inputSchema.required.includes('confirm'));
+    assert.equal(removeDevice.inputSchema.properties.confirm.const, true);
+    assert.equal(removeDevice.annotations.destructiveHint, true);
+
+    const rejected = await fetch(`${base}/mcp`, {
+      method: 'POST',
+      headers: authHeaders({ 'mcp-session-id': sessionId }),
+      body: mcpBody(3, 'tools/call', { name: 'remove_device', arguments: { id: 'test-device' } }),
+    });
+    const rejection = await responseMessage(rejected);
+    assert.equal(rejection.result.isError, true);
+    assert.match(rejection.result.content[0].text, /requires confirm=true/);
+  } finally {
+    await service.close();
+  }
+});
