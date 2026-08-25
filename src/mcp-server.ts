@@ -6,8 +6,10 @@ import {
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { ZigbeeDatabase } from './database.js';
+import { validateDeviceCommand } from './device-command.js';
 import { MqttListener } from './mqtt-listener.js';
 import { DeviceInfo, DeviceFieldInfo, IntegrationInfo } from './types.js';
+import { SERVER_VERSION } from './version.js';
 
 const objectSchema = (properties: Record<string, object>, required: string[] = []) => ({
   type: 'object' as const,
@@ -16,7 +18,10 @@ const objectSchema = (properties: Record<string, object>, required: string[] = [
   additionalProperties: false,
 });
 const stringArg = (description: string) => ({ type: 'string' as const, minLength: 1, description });
-const allowDestructive = process.env.ALLOW_DESTRUCTIVE === 'true';
+
+export interface ZigbeeMcpServerOptions {
+  allowDestructive?: boolean;
+}
 
 const MANAGEMENT_TOOLS: Tool[] = [
   { name: 'get_bridge_info', description: 'Get retained Zigbee2MQTT bridge and coordinator information', inputSchema: objectSchema({}) },
@@ -90,16 +95,23 @@ export class ZigbeeMcpServer {
   private db: ZigbeeDatabase;
   private mqtt: MqttListener;
   private baseTopic: string;
+  private readonly allowDestructive: boolean;
 
-  constructor(db: ZigbeeDatabase, mqtt: MqttListener, baseTopic: string) {
+  constructor(
+    db: ZigbeeDatabase,
+    mqtt: MqttListener,
+    baseTopic: string,
+    options: ZigbeeMcpServerOptions = {},
+  ) {
     this.db = db;
     this.mqtt = mqtt;
     this.baseTopic = baseTopic;
+    this.allowDestructive = options.allowDestructive ?? false;
 
     this.server = new Server(
       {
         name: 'zigbee2mqtt-mcp',
-        version: '1.1.0',
+        version: SERVER_VERSION,
       },
       {
         capabilities: {
@@ -302,7 +314,7 @@ export class ZigbeeMcpServer {
       },
     ];
     return [...tools, ...MANAGEMENT_TOOLS]
-      .filter(tool => allowDestructive || !MANAGEMENT_WRITE_TOOLS.has(tool.name))
+      .filter(tool => this.allowDestructive || !MANAGEMENT_WRITE_TOOLS.has(tool.name))
       .map(tool => ({
       ...tool,
       annotations: {
@@ -434,7 +446,7 @@ export class ZigbeeMcpServer {
       throw new Error(`Device not found: ${device}`);
     }
 
-    this.validateDeviceCommand(dbDevice.ieee_address, command);
+    validateDeviceCommand(this.db.getDeviceFields(dbDevice.ieee_address), command);
     await this.mqtt.publishCommand(dbDevice.friendly_name, command);
 
     return {
@@ -445,37 +457,6 @@ export class ZigbeeMcpServer {
         },
       ],
     };
-  }
-
-  private validateDeviceCommand(ieeeAddress: string, command: unknown): asserts command is Record<string, unknown> {
-    if (!command || typeof command !== 'object' || Array.isArray(command)) {
-      throw new Error('command must be a JSON object');
-    }
-    const serialized = JSON.stringify(command);
-    if (serialized.length > 16384) throw new Error('command payload exceeds 16 KiB');
-    const entries = Object.entries(command);
-    if (entries.length === 0 || entries.length > 32) throw new Error('command must contain 1 to 32 properties');
-
-    const fields = this.db.getDeviceFields(ieeeAddress);
-    for (const [name, value] of entries) {
-      const field = fields.find(candidate => candidate.field_name === name);
-      if (!field) throw new Error(`Unknown command property: ${name}`);
-      if (!field.access?.split(',').includes('write')) throw new Error(`Property is not writable: ${name}`);
-      if (field.enum_values && !field.enum_values.includes(String(value))) {
-        throw new Error(`${name} must be one of: ${field.enum_values.join(', ')}`);
-      }
-      if (field.field_type === 'number') {
-        if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${name} must be a finite number`);
-        if (field.value_min !== undefined && value < field.value_min) throw new Error(`${name} must be at least ${field.value_min}`);
-        if (field.value_max !== undefined && value > field.value_max) throw new Error(`${name} must be at most ${field.value_max}`);
-      }
-      if (field.field_type === 'boolean' && !field.enum_values && typeof value !== 'boolean') {
-        throw new Error(`${name} must be a boolean`);
-      }
-      if (field.field_type === 'object' && (!value || typeof value !== 'object' || Array.isArray(value))) {
-        throw new Error(`${name} must be an object`);
-      }
-    }
   }
 
   private async handleFindByCapability(args: any) {
@@ -874,8 +855,8 @@ export class ZigbeeMcpServer {
   }
 
   private async handleManagementTool(name: string, args: Record<string, any>) {
-    if (MANAGEMENT_WRITE_TOOLS.has(name) && !allowDestructive) {
-      throw new Error(`${name} is disabled; enable the allow_destructive add-on option explicitly`);
+    if (MANAGEMENT_WRITE_TOOLS.has(name) && !this.allowDestructive) {
+      throw new Error(`${name} is disabled; enable allow_destructive explicitly`);
     }
     if (DESTRUCTIVE_TOOLS.has(name) && args.confirm !== true) {
       throw new Error(`${name} requires confirm=true`);

@@ -26,7 +26,7 @@ interface BridgeResponse {
   transaction?: string;
 }
 
-function redactUrl(value: string): string {
+export function redactUrl(value: string): string {
   try {
     const parsed = new URL(value);
     if (parsed.username || parsed.password) {
@@ -39,8 +39,8 @@ function redactUrl(value: string): string {
   }
 }
 
-function sanitize(value: unknown, key = ''): unknown {
-  if (/password|network_key|auth_token|secret/i.test(key)) return '[redacted]';
+export function sanitize(value: unknown, key = ''): unknown {
+  if (/password|passphrase|network_key|api_key|token|secret|username|user/i.test(key)) return '[redacted]';
   if (Array.isArray(value)) return value.map(item => sanitize(item));
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, sanitize(child, childKey)]));

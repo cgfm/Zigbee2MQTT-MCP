@@ -1,0 +1,25 @@
+services:
+  zigbee2mqtt-mcp:
+    image: ghcr.io/cgfm/zigbee2mqtt-mcp:1.2.0
+    build:
+      context: .
+      args:
+        BUILD_VERSION: 1.2.0
+        BUILD_ARCH: amd64
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "3235:3235"
+    volumes:
+      - zigbee2mqtt_mcp_data:/data
+      # Uncomment for TLS certificates:
+      # - ./ssl:/ssl:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  zigbee2mqtt_mcp_data:
