@@ -21,6 +21,7 @@ export interface DeviceField {
   enum_values?: string[];
   unit?: string;
   description?: string;
+  access?: string;
   created_at?: number;
 }
 
@@ -68,6 +69,9 @@ export interface Z2MExpose {
   value_max?: number;
   value_step?: number;
   values?: string[];
+  value_on?: string | number | boolean;
+  value_off?: string | number | boolean;
+  value_toggle?: string | number | boolean;
   features?: Z2MExpose[];
   endpoint?: string;
 }
@@ -96,6 +100,7 @@ export interface DeviceFieldInfo {
   values?: string[];
   unit?: string;
   description?: string;
+  access?: string;
 }
 
 export interface IntegrationInfo {

@@ -1,14 +1,16 @@
 {
-  "name": "zigbee2mqtt-mcp-server",
-  "version": "1.0.0",
+  "name": "zigbee2mqtt-mcp",
+  "version": "1.2.0",
   "description": "MCP Server for ZigBee2MQTT - Smart device discovery and control",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc && node dist/index.js",
-    "watch": "tsc --watch"
+    "dev": "npm run build && node --watch dist/index.js",
+    "watch": "tsc --watch --preserveWatchOutput",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "test:container": "bash tests/container-smoke.sh"
   },
   "keywords": [
     "mcp",
@@ -17,22 +19,29 @@
     "home-automation",
     "zigbee2mqtt"
   ],
-  "author": "",
+  "author": "cgfm and contributors",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cgfm/Zigbee2MQTT-MCP.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cgfm/Zigbee2MQTT-MCP/issues"
+  },
+  "homepage": "https://github.com/cgfm/Zigbee2MQTT-MCP#readme",
+  "engines": {
+    "node": ">=24.18.0 <25"
+  },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4",
-    "mqtt": "^5.10.1",
-    "better-sqlite3": "^11.5.0",
-    "express": "^4.21.1",
-    "cors": "^2.8.5",
-    "eventsource": "^2.0.2",
-    "node-fetch": "^3.3.2"
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "mqtt": "5.15.2",
+    "better-sqlite3": "11.10.0",
+    "express": "4.22.2"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^22.8.6",
-    "@types/express": "^5.0.0",
-    "@types/cors": "^2.8.17",
-    "typescript": "^5.6.3"
+    "@types/better-sqlite3": "7.6.13",
+    "@types/node": "22.20.1",
+    "@types/express": "5.0.6",
+    "typescript": "5.9.3"
   }
 }

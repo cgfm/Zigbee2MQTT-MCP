@@ -71,8 +71,11 @@ export class SchemaDiscovery {
     let valueMax: number | undefined;
 
     if (expose.type === 'binary') {
-      fieldType = 'boolean';
-      enumValues = expose.values; // ON/OFF, true/false, etc.
+      const binaryValues = [expose.value_on, expose.value_off, expose.value_toggle]
+        .filter(value => value !== undefined)
+        .map(value => String(value));
+      fieldType = binaryValues.length > 0 ? 'enum' : 'boolean';
+      enumValues = binaryValues.length > 0 ? binaryValues : expose.values;
     } else if (expose.type === 'enum') {
       fieldType = 'enum';
       enumValues = expose.values;
@@ -82,6 +85,14 @@ export class SchemaDiscovery {
       valueMax = expose.value_max;
     } else if (expose.type === 'composite') {
       fieldType = 'object';
+      const field: DeviceField = {
+        ieee_address: ieeeAddress,
+        field_name: propertyName,
+        field_type: fieldType,
+        description: expose.description,
+        access: this.parseAccess(expose.access),
+      };
+      this.db.upsertDeviceField(field);
       // Process nested features
       if (expose.features) {
         expose.features.forEach(feature => {
@@ -101,6 +112,7 @@ export class SchemaDiscovery {
       enum_values: enumValues,
       unit: expose.unit,
       description: expose.description,
+      access: this.parseAccess(expose.access),
     };
 
     this.db.upsertDeviceField(field);

@@ -26,6 +26,35 @@ export class ZigbeeDatabase {
       CREATE INDEX IF NOT EXISTS idx_devices_friendly_name ON devices(friendly_name);
     `);
 
+    // Repair databases created by the short-lived add-on patch that removed
+    // UNIQUE from friendly_name. Keep the most recently updated duplicate,
+    // then restore uniqueness with an explicit index.
+    const devicesSchema = this.db
+      .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'devices'`)
+      .get() as { sql: string } | undefined;
+
+    if (devicesSchema && !/friendly_name\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(devicesSchema.sql)) {
+      const migrateFriendlyNameUniqueness = this.db.transaction(() => {
+        this.db.exec(`
+          DELETE FROM devices
+          WHERE rowid NOT IN (
+            SELECT (
+              SELECT newest.rowid
+              FROM devices AS newest
+              WHERE newest.friendly_name = grouped.friendly_name
+              ORDER BY newest.updated_at DESC, newest.rowid DESC
+              LIMIT 1
+            )
+            FROM devices AS grouped
+            GROUP BY grouped.friendly_name
+          );
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_friendly_name_unique
+          ON devices(friendly_name);
+        `);
+      });
+      migrateFriendlyNameUniqueness();
+    }
+
     // Device fields - schema/structure of each device's data
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS device_fields (
@@ -38,12 +67,18 @@ export class ZigbeeDatabase {
         enum_values TEXT,
         unit TEXT,
         description TEXT,
+        access TEXT,
         created_at INTEGER NOT NULL,
         FOREIGN KEY (ieee_address) REFERENCES devices(ieee_address) ON DELETE CASCADE,
         UNIQUE(ieee_address, field_name)
       );
       CREATE INDEX IF NOT EXISTS idx_device_fields_ieee ON device_fields(ieee_address);
     `);
+
+    const fieldColumns = this.db.prepare(`PRAGMA table_info(device_fields)`).all() as { name: string }[];
+    if (!fieldColumns.some(column => column.name === 'access')) {
+      this.db.exec(`ALTER TABLE device_fields ADD COLUMN access TEXT`);
+    }
 
     // Device capabilities - what actions can be performed
     this.db.exec(`
@@ -75,6 +110,17 @@ export class ZigbeeDatabase {
   // Device operations
   upsertDevice(device: DatabaseDevice): void {
     const now = Date.now();
+
+    // friendly_name has a UNIQUE constraint, but ieee_address is the stable identity.
+    // When a device is renamed or re-paired, its friendly_name migrates to a different
+    // ieee_address. Z2M guarantees friendly_name is globally unique, so any existing row
+    // holding this name under a *different* ieee is stale — drop it first, otherwise the
+    // ieee-keyed upsert below hits the UNIQUE(friendly_name) constraint and the whole
+    // bridge/devices batch aborts mid-way.
+    this.db
+      .prepare(`DELETE FROM devices WHERE friendly_name = ? AND ieee_address != ?`)
+      .run(device.friendly_name, device.ieee_address);
+
     const stmt = this.db.prepare(`
       INSERT INTO devices (ieee_address, friendly_name, model, vendor, description, device_type, last_seen, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -113,6 +159,24 @@ export class ZigbeeDatabase {
     return stmt.all() as DatabaseDevice[];
   }
 
+  removeDevicesNotIn(activeIeeeAddresses: string[]): void {
+    const active = new Set(activeIeeeAddresses);
+    const stale = this.getAllDevices().filter(device => !active.has(device.ieee_address));
+    const remove = this.db.transaction((devices: DatabaseDevice[]) => {
+      const deleteState = this.db.prepare('DELETE FROM current_states WHERE ieee_address = ?');
+      const deleteCapabilities = this.db.prepare('DELETE FROM device_capabilities WHERE ieee_address = ?');
+      const deleteFields = this.db.prepare('DELETE FROM device_fields WHERE ieee_address = ?');
+      const deleteDevice = this.db.prepare('DELETE FROM devices WHERE ieee_address = ?');
+      for (const device of devices) {
+        deleteState.run(device.ieee_address);
+        deleteCapabilities.run(device.ieee_address);
+        deleteFields.run(device.ieee_address);
+        deleteDevice.run(device.ieee_address);
+      }
+    });
+    remove(stale);
+  }
+
   searchDevices(query: string): DatabaseDevice[] {
     const stmt = this.db.prepare(`
       SELECT * FROM devices
@@ -126,15 +190,16 @@ export class ZigbeeDatabase {
   // Field operations
   upsertDeviceField(field: DeviceField): void {
     const stmt = this.db.prepare(`
-      INSERT INTO device_fields (ieee_address, field_name, field_type, value_min, value_max, enum_values, unit, description, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO device_fields (ieee_address, field_name, field_type, value_min, value_max, enum_values, unit, description, access, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(ieee_address, field_name) DO UPDATE SET
         field_type = excluded.field_type,
         value_min = excluded.value_min,
         value_max = excluded.value_max,
         enum_values = excluded.enum_values,
         unit = excluded.unit,
-        description = excluded.description
+        description = excluded.description,
+        access = COALESCE(excluded.access, device_fields.access)
     `);
 
     stmt.run(
@@ -146,6 +211,7 @@ export class ZigbeeDatabase {
       field.enum_values ? JSON.stringify(field.enum_values) : null,
       field.unit ?? null,
       field.description ?? null,
+      field.access ?? null,
       Date.now()
     );
   }
